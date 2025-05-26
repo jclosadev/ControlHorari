@@ -539,14 +539,13 @@ def crear_password():
     sin_password = [u for u in all_users if u not in USERS]
     return render_template_string(crear_password_template, users=sin_password)
 
-# Funció per actualitzar absències d'un usuari
 def update_absences(user):
     today_date = date.today()
     with open(csv_file, 'r', newline='') as file:
         reader = list(csv.reader(file))
     header = reader[0]
     records = reader[1:]
-    
+
     # Filtrar els registres de l'usuari
     user_records = [row for row in records if row[1] == user]
     if user_records:
@@ -559,13 +558,16 @@ def update_absences(user):
 
     missing_date = last_record_date + timedelta(days=1)
     updated = False
+
     while missing_date < today_date:
-        if not any(row for row in user_records if row[0] == missing_date.strftime("%Y-%m-%d")):
-            new_record = [missing_date.strftime("%Y-%m-%d"), user, "Ausente", "Ausente"]
-            records.append(new_record)
-            updated = True
+        # Saltar fines de semana
+        if missing_date.weekday() < 5:  # 0=lunes, 6=domingo; <5 significa de lunes a viernes
+            if not any(row for row in user_records if row[0] == missing_date.strftime("%Y-%m-%d")):
+                new_record = [missing_date.strftime("%Y-%m-%d"), user, "Ausente", "Ausente"]
+                records.append(new_record)
+                updated = True
         missing_date += timedelta(days=1)
-    
+
     if updated:
         with open(csv_file, 'w', newline='') as file:
             writer = csv.writer(file)
@@ -777,9 +779,14 @@ def registrar():
 @login_required
 def admin():
     with open(csv_file, 'r', newline='') as file:
-        registros = list(csv.reader(file))
-    header = registros[0]
-    registros = registros[1:]
+        reader = csv.reader(file)
+        registros = list(reader)
+
+    if not registros:
+        registros = []
+
+    header = registros[0] if registros else []
+    registros = [r for r in registros[1:] if len(r) == 4 and r[0] != 'Data']
 
     mes_actual = request.args.get('mes', 'Todos')
     user_filter = request.args.get('user', 'Todos')
@@ -812,10 +819,14 @@ def admin():
         horas_dia = 0.0
 
         for r in registros_dia:
-            if r[2] and r[2] != "Ausente":
-                entradas.append(datetime.strptime(f"{r[0]} {r[2]}", "%Y-%m-%d %H:%M:%S"))
-            if r[3] and r[3] != "Ausente":
-                salidas.append(datetime.strptime(f"{r[0]} {r[3]}", "%Y-%m-%d %H:%M:%S"))
+            try:
+                if r[2] and r[2] != "Ausente":
+                    entradas.append(datetime.strptime(f"{r[0]} {r[2]}", "%Y-%m-%d %H:%M:%S"))
+                if r[3] and r[3] != "Ausente":
+                    salidas.append(datetime.strptime(f"{r[0]} {r[3]}", "%Y-%m-%d %H:%M:%S"))
+            except ValueError as e:
+                print(f"⚠️ Error en fila: {r} → {e}")
+                continue
 
         for entrada, salida in zip(entradas, salidas):
             if salida > entrada:
@@ -833,7 +844,7 @@ def admin():
     total_horas = round(total_horas, 2)
 
     # Ordenar por fecha descendente
-    registros_resultado.sort(key=lambda x: x[1], reverse=True)
+    registros_resultado.sort(key=lambda x: x[0], reverse=True)
 
     return render_template_string(html_registros,
                                   registros=registros_resultado,
